@@ -89,7 +89,7 @@ lightning:
         vocoder_cfg:
           target: vocoder.bigvgan.models.VocoderBigVGAN
           params:
-            ckpt_vocoder: ldm_src/ckpt/bigvnat
+            ckpt_vocoder: useful_ckpts/bigvnat
   trainer:
     benchmark: True
     gradient_clip_val: 1.0

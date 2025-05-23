@@ -14,22 +14,94 @@ from vocoder.bigvgan.models import VocoderBigVGAN
 import soundfile
 from pathlib import Path
 from tqdm import tqdm
-def load_model_from_config(config, ckpt = None, verbose=True):
+
+
+def load_model_from_config(config, ckpt=None, verbose=True):
+    print(f"DEBUG: Istanzio modello da config: {config.model}")  # Aggiunto debug
     model = instantiate_from_config(config.model)
     if ckpt:
         print(f"Loading model from {ckpt}")
         pl_sd = torch.load(ckpt, map_location="cpu")
-        sd = pl_sd["state_dict"]
 
-        print(f'---------------------------epoch : {pl_sd["epoch"]}, global step: {pl_sd["global_step"]//1e3}k---------------------------')
+        # Controlla se 'state_dict' è la chiave corretta o se i pesi sono al primo livello
+        if "state_dict" in pl_sd:
+            sd = pl_sd["state_dict"]
+            print(
+                f'---------------------------epoch : {pl_sd.get("epoch", "N/A")}, global step: {pl_sd.get("global_step", 0) // 1e3}k---------------------------')  # Usato .get per sicurezza
+        else:
+            sd = pl_sd  # A volte i checkpoint non hanno la chiave 'state_dict'
+            print("DEBUG: Chiave 'state_dict' non trovata nel checkpoint, uso il checkpoint direttamente.")
+            print(
+                f'---------------------------epoch: N/A, global step: N/A (struttura checkpoint diversa)---------------------------')
+
+        # --- INIZIO BLOCCO DI DEBUG E CORREZIONE CHIAVI ---
+        print("\nDEBUG: Prime 5 chiavi del MODELLO (model.state_dict().keys()):")
+        model_keys = list(model.state_dict().keys())
+        for i, key in enumerate(model_keys[:5]):
+            print(f"  {key}")
+
+        print("\nDEBUG: Prime 5 chiavi del CHECKPOINT CARICATO (sd.keys()):")
+        checkpoint_keys = list(sd.keys())
+        for i, key in enumerate(checkpoint_keys[:5]):
+            print(f"  {key}")
+
+        # Logica di correzione potenziale:
+        # Se le chiavi del modello iniziano con 'model.' e quelle del checkpoint no,
+        # aggiungiamo 'model.' alle chiavi del checkpoint.
+
+        # Controlliamo se dobbiamo aggiungere il prefisso 'model.'
+        needs_prefix_addition = False
+        if model_keys and checkpoint_keys:  # Assicurati che entrambe le liste non siano vuote
+            if model_keys[0].startswith("model.") and not checkpoint_keys[0].startswith("model."):
+                needs_prefix_addition = True
+                print(
+                    "\nINFO DEBUG: Rilevato che le chiavi del modello hanno 'model.' e quelle del checkpoint no. Tenterò di AGGIUNGERE il prefisso 'model.' alle chiavi del checkpoint.")
+            elif not model_keys[0].startswith("model.") and checkpoint_keys[0].startswith("model."):
+                print(
+                    "\nINFO DEBUG: Rilevato che le chiavi del checkpoint hanno 'model.' e quelle del modello no. Tenterò di RIMUOVERE il prefisso 'model.' dalle chiavi del checkpoint.")
+                # Questo è il caso che il tuo log originale suggeriva fosse in atto
+                # ma i messaggi di missing/unexpected indicano il contrario per questo specifico checkpoint.
+                new_sd = {}
+                for k, v in sd.items():
+                    if k.startswith("model."):
+                        new_sd[k[len("model."):]] = v
+                    else:
+                        new_sd[k] = v  # Mantieni le chiavi che non hanno il prefisso
+                sd = new_sd
+                print("DEBUG: Prefisso 'model.' rimosso dalle chiavi del checkpoint (se presente).")
+                # Ricontrolla le chiavi del checkpoint dopo la rimozione
+                print("\nDEBUG: Prime 5 chiavi del CHECKPOINT dopo tentativo di rimozione prefisso:")
+                checkpoint_keys_after_removal = list(sd.keys())
+                for i, key in enumerate(checkpoint_keys_after_removal[:5]):
+                    print(f"  {key}")
+
+        if needs_prefix_addition:
+            new_sd = {}
+            for k, v in sd.items():
+                new_sd[f"model.{k}"] = v
+            sd = new_sd  # Sovrascrivi sd con le chiavi modificate
+            print("DEBUG: Prefisso 'model.' AGGIUNTO alle chiavi del checkpoint.")
+            # Ricontrolla le chiavi del checkpoint dopo l'aggiunta
+            print("\nDEBUG: Prime 5 chiavi del CHECKPOINT dopo AGGIUNTA prefisso:")
+            checkpoint_keys_after_addition = list(sd.keys())
+            for i, key in enumerate(checkpoint_keys_after_addition[:5]):
+                print(f"  {key}")
+
+        # --- FINE BLOCCO DI DEBUG E CORREZIONE CHIAVI ---
 
         m, u = model.load_state_dict(sd, strict=False)
         if len(m) > 0 and verbose:
-            print("missing keys:")
+            print(
+                "ATTENZIONE: Ancora chiavi mancanti nel modello dopo la correzione (missing keys):")  # Cambiato in ATTENZIONE
             print(m)
         if len(u) > 0 and verbose:
-            print("unexpected keys:")
+            print(
+                "ATTENZIONE: Ancora chiavi inaspettate nel checkpoint dopo la correzione (unexpected keys):")  # Cambiato in ATTENZIONE
             print(u)
+
+        if not m and not u:  # Se entrambe le liste sono vuote
+            print("INFO: Tutte le chiavi del checkpoint sono state caricate con successo nel modello!")
+
     else:
         print(f"Note chat no ckpt is loaded !!!")
 

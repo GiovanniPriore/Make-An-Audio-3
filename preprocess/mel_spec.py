@@ -183,7 +183,7 @@ def parse_args():
 
 if __name__ == '__main__':
     pargs = parse_args()
-    tsv_path = pargs.tsv_path
+    tsv_path = '/kaggle/working/mio_singolo_file_manifest.tsv'
     if os.path.isdir(tsv_path):
         files = glob(os.path.join(tsv_path,'*.tsv'))
         for file in files:
@@ -192,7 +192,7 @@ if __name__ == '__main__':
         drop_bad_wavs(tsv_path)
     num_gpus = pargs.num_gpus
     batch_max_length = int(pargs.max_duration * 62.5)# 62.5 is the mel length for 1 second
-    save_path = 'processed'
+    save_path = '/kaggle/working/my_single_video_preprocessed'
     args = {
         'audio_sample_rate': 16000,
         'audio_num_mel_bins':80,

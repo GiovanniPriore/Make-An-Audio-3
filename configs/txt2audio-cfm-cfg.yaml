@@ -70,7 +70,7 @@ model:
       target: ldm.modules.encoders.modules.FrozenCLAPFLANEmbedder
       params:
         # MODIFICA QUESTA RIGA per puntare al tuo file CLAP_weights_2022.pth in Kaggle
-        weights_path: "/kaggle/input/dataset-maa/CLAP_weights_2022.pth" # ESEMPIO DI PATH
+        weights_path: "/kaggle/input/dataset-maa/Dataset_MAA/Dataset_MAA/CLAP_weights_2022.pth" # ESEMPIO DI PATH
 
 
 lightning:

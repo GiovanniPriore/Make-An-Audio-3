@@ -45,7 +45,8 @@ model:
       params:
         embed_dim: 20
         monitor: val/rec_loss
-        ckpt_path: ldm_src/ckpt/epoch=000032.ckpt
+        # Questo path dovrebbe già essere stato gestito copiando il file in ldm_src/ckpt/
+        ckpt_path: ldm_src/ckpt/epoch=000032.ckpt 
         ddconfig:
           double_z: true
           in_channels: 80
@@ -68,7 +69,8 @@ model:
     cond_stage_config:
       target: ldm.modules.encoders.modules.FrozenCLAPFLANEmbedder
       params:
-        weights_path: ldm_src/ckpt/CLAP/CLAP_weights_2022.pth
+        # MODIFICA QUESTA RIGA per puntare al tuo file CLAP_weights_2022.pth in Kaggle
+        weights_path: "/kaggle/input/dataset-maa/CLAP_weights_2022.pth" # ESEMPIO DI PATH
 
 
 lightning:
@@ -86,7 +88,17 @@ lightning:
         vocoder_cfg:
           target: vocoder.bigvgan.models.VocoderBigVGAN
           params:
-            ckpt_vocoder: ldm_src/ckpt/bigvnat
+            # Anche questo path potrebbe necessitare di attenzione se non è relativo al progetto
+            # o se i file del vocoder non sono dove lo script si aspetta.
+            # Il tuo comando di inferenza usa: --vocoder-ckpt useful_ckpts/bigvnat
+            # Se hai caricato i file del vocoder (es. g_02500000 e config.json)
+            # in /kaggle/input/dataset-maa/vocoder_bigvnat/, allora potresti dover
+            # cambiare questo ckpt_vocoder a quel path.
+            # Tuttavia, l'argomento da riga di comando --vocoder-ckpt dovrebbe
+            # sovrascrivere questo se lo script è scritto per farlo.
+            # Il tuo comando usa --vocoder-ckpt useful_ckpts/bigvnat
+            # Assicurati che i file del vocoder siano in /kaggle/working/Make-An-Audio-3/useful_ckpts/bigvnat/
+            ckpt_vocoder: ldm_src/ckpt/bigvnat # Lascia questo se --vocoder-ckpt lo sovrascrive o se hai copiato i file lì
   trainer:
     benchmark: True
     gradient_clip_val: 1.0

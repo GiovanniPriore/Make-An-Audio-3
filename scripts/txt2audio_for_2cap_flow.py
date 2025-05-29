@@ -192,12 +192,29 @@ class GenSamples:
                 record_dicts.append(record_dict)
 
 
-        wav_gt = self.vocoder.vocode(gt)
-        wav_path = os.path.join(self.outpath, wav_name + f'_gt.wav')
-        soundfile.write(wav_path, wav_gt, 16000)
+        # --- MODIFICA QUI ---
+        # Processa e salva il ground truth solo se gt è fornito
+        if gt is not None:
+            print(f"DEBUG: Processazione del ground truth (gt) fornito.")
+            # Assicurati che gt sia un tensore o array numpy prima di passarlo al vocoder
+            # Se gt è un path a un file, dovresti caricarlo prima.
+            # Assumendo che gt sia già uno spettrogramma (come per il dataset di test)
+            try:
+                wav_gt = self.vocoder.vocode(gt) # gt dovrebbe essere lo spettrogramma
+                # Assicurati che wav_name sia definito anche se mel_name non lo è
+                gt_wav_filename_base = wav_name if wav_name else "ground_truth_audio"
+                wav_path_gt = os.path.join(self.outpath, gt_wav_filename_base + f'_gt.wav')
+                soundfile.write(wav_path_gt, wav_gt, 16000) # La sample rate per GT è 16000 nel codice originale. Adatta se necessario.
+                print(f"Audio Ground Truth salvato in: {wav_path_gt}")
+            except Exception as e_gt_vocode:
+                print(f"WARN: Errore durante la processazione del ground truth (gt): {e_gt_vocode}")
+                print(f"      gt era: {type(gt)}")
+
+        else:
+            print("DEBUG: Nessun ground truth (gt) fornito, salto la sua processazione.")
+        # --- FINE MODIFICA ---
 
         return record_dicts
-
 
 
 def main():

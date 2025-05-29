@@ -19,7 +19,10 @@ def load_model_from_config(config, ckpt = None, verbose=True):
     model = instantiate_from_config(config.model)
     if ckpt:
         print(f"Loading model from {ckpt}")
-        pl_sd = torch.load(ckpt, map_location="cpu")
+        # Riga originale:
+        # pl_sd = torch.load(ckpt, map_location="cpu")
+        # Riga Modificata:
+        pl_sd = torch.load(ckpt, map_location="cpu", weights_only=False)
         sd = pl_sd["state_dict"]
         
         m, u = model.load_state_dict(sd, strict=False)
@@ -247,7 +250,16 @@ def main():
             else:
                 ori_caption = opt.prompt
                 wav_name = f'{ori_caption.strip().replace(" ", "-")}'
-                prompt = {'ori_caption':[ori_caption]}
+                # Modifica: Aggiungi struct_caption
+                # Opzione A.1: struct_caption uguale a ori_caption
+                struct_caption_for_prompt = ori_caption
+                # Opzione A.2: struct_caption stringa vuota se non la usi
+                # struct_caption_for_prompt = "" 
+                prompt = {
+                    'ori_caption': [ori_caption],
+                    'struct_caption': [struct_caption_for_prompt]  # Assicurati sia una lista di stringhe
+                }
+                print(f"DEBUG: Prompt preparato per gen_test_sample: {prompt}")  # Per debug
                 generator.gen_test_sample(prompt, wav_name=wav_name)
 
     print(f"Your samples are ready and waiting four you here: \n{opt.outdir} \nEnjoy.")

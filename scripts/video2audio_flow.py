@@ -43,9 +43,12 @@ def load_model_from_config(config, ckpt=None, verbose=True):
     model = instantiate_from_config(config.model)
     if ckpt:
         print(f"Loading model from {ckpt}")
-        # Se questo ckpt causa problemi di unpickling con PyTorch >= 2.1, aggiungi weights_only=False
-        # pl_sd = torch.load(ckpt, map_location="cpu", weights_only=False)
-        pl_sd = torch.load(ckpt, map_location="cpu")  # Originale
+        # --- MODIFICA QUI ---
+        # Riga originale:
+        # pl_sd = torch.load(ckpt, map_location="cpu")
+        # Riga Modificata:
+        pl_sd = torch.load(ckpt, map_location="cpu", weights_only=False)
+        # --- FINE MODIFICA ---
 
         if "state_dict" in pl_sd:
             sd = pl_sd["state_dict"]

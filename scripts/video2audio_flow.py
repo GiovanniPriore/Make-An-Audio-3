@@ -212,7 +212,7 @@ def main():
     # (dovrai scaricarli e metterli lì, o nel tuo dataset Kaggle e cambiare il path)
     # Esempio: path_to_vocoder_generator_file = "/kaggle/working/Make-An-Audio-3/ldm_src/ckpt/bigvnat/g_02500000.pth"
     # Se hai caricato g_02500000.pth e config.json in /kaggle/input/dataset-maa/vocoder_bigvnat/
-    path_to_vocoder_generator_file = "/kaggle/input/dataset-maa/vocoder_bigvnat/g_02500000.pth"  # MODIFICA QUESTO SE NECESSARIO
+    path_to_vocoder_generator_file = "/kaggle/input/dataset-maa/Dataset_MAA/Dataset_MAA/CLAP_weights_2022.pth"  # MODIFICA QUESTO SE NECESSARIO
 
     if not os.path.exists(path_to_vocoder_generator_file):
         print(f"ERRORE: File generatore Vocoder '{path_to_vocoder_generator_file}' non trovato!")

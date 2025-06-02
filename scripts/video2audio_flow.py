@@ -164,86 +164,84 @@ def parse_args():
 
 
 def main():
-    opt = parse_args()
+    opt = parse_args()  # Assicurati che parse_args() sia definito come discusso,
+    # con i nuovi argomenti --custom_...
 
     # Stampa argomenti per debug
-    print("--- ARGOMENTI PARSATI ---")
+    print("--- ARGOMENTI PARSATI (V2A SCRIPT) ---")
     for arg, value in vars(opt).items():
-        print(f"{arg}: {value}")
-    print("-------------------------")
+        print(f"  {arg}: {value}")
+    print("------------------------------------")
 
     config = OmegaConf.load(opt.base)
 
     # Verifica se il checkpoint del modello principale è specificato e valido
     if not opt.resume or not os.path.exists(opt.resume):
-        print(f"ERRORE: Checkpoint del modello V2A non specificato o non trovato: {opt.resume}")
+        print(f"ERRORE: Checkpoint del modello V2A (--resume) non specificato o non trovato: {opt.resume}")
         sys.exit(1)
 
-    model = load_model_from_config(config, opt.resume)
+    model = load_model_from_config(config, opt.resume)  # Assicurati che load_model_from_config
+    # abbia weights_only=False se necessario
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
+    print(f"Modello principale V2A spostato su: {device}")
 
     os.makedirs(opt.outdir, exist_ok=True)
+    print(f"Directory di output: {opt.outdir}")
 
-    # Gestione path vocoder
-    # L'argomento da riga di comando --vocoder-ckpt (se lo aggiungi) dovrebbe avere la precedenza.
-    # Altrimenti, usa quello dal config.
-    # Per ora, assumiamo che il config YAML punti a un path valido o che tu copi i file.
-    # Path originale dal config: config['lightning']['callbacks']['image_logger']['params']['vocoder_cfg']['params']['ckpt_vocoder']
-    # Questo path nel config YAML è: ldm_src/ckpt/bigvnat
-    # Se vuoi usare un path diverso passato da riga di comando, dovresti aggiungere un argomento --vocoder_ckpt
-    # e usarlo qui. Per ora, usiamo il path dal config, assumendo che tu abbia copiato i file vocoder
-    # in /kaggle/working/Make-An-Audio-3/ldm_src/ckpt/bigvnat/ (es. g_xxxxxxxx e config.json)
-    # OPPURE, se hai caricato i file del vocoder nel tuo dataset Kaggle, modifica questo path.
-    vocoder_ckpt_path_from_config = config['lightning']['callbacks']['image_logger']['params']['vocoder_cfg']['params'][
-        'ckpt_vocoder']
-    # Esempio: se i file del vocoder (generatore .pth e config.json) sono in /kaggle/input/dataset-maa/vocoder_files/
-    # e il generatore si chiama g_model.pth, allora:
-    # vocoder_ckpt_path_to_use = "/kaggle/input/dataset-maa/vocoder_files/g_model.pth"
-    # Per ora, assumiamo che l'utente prepari la directory ldm_src/ckpt/bigvnat/
+    # --- Gestione Path Vocoder (Opzione 1: usa i file clonati con il progetto) ---
+    # Path alla DIRECTORY che contiene best_netG.pt e args.yml del vocoder
+    path_to_vocoder_directory = "/kaggle/working/Make-An-Audio-3/useful_ckpts/bigvnat"
 
-    # Prepara il path completo al file del generatore del vocoder.
-    # VocoderBigVGAN si aspetta il path al file del generatore .pth,
-    # e il config.json deve essere nella stessa directory.
-    # Il tuo YAML per V2A ha 'ldm_src/ckpt/bigvnat'. Assumiamo che questo sia il NOME BASE.
-    # Se il file è g_02500000.pth, allora il path base è 'ldm_src/ckpt/bigvnat/g_02500000'
-    # E il config.json è in 'ldm_src/ckpt/bigvnat/config.json'
-    # Per ora, usiamo un path placeholder che dovrai sistemare:
+    print(f"Path alla directory del Vocoder (atteso): {path_to_vocoder_directory}")
 
-    # Assumiamo che la directory 'ldm_src/ckpt/bigvnat/' contenga 'g_model.pth' e 'config.json'
-    # (dovrai scaricarli e metterli lì, o nel tuo dataset Kaggle e cambiare il path)
-    # Esempio: path_to_vocoder_generator_file = "/kaggle/working/Make-An-Audio-3/ldm_src/ckpt/bigvnat/g_02500000.pth"
-    # Se hai caricato g_02500000.pth e config.json in /kaggle/input/dataset-maa/vocoder_bigvnat/
-    path_to_vocoder_generator_file = "/kaggle/input/dataset-maa/Dataset_MAA/Dataset_MAA/CLAP_weights_2022.pth"  # MODIFICA QUESTO SE NECESSARIO
-
-    if not os.path.exists(path_to_vocoder_generator_file):
-        print(f"ERRORE: File generatore Vocoder '{path_to_vocoder_generator_file}' non trovato!")
-        print("Assicurati di aver scaricato g_xxxx.pth e config.json e che il path sia corretto.")
+    # Verifica che la directory e i file necessari esistano
+    if not os.path.isdir(path_to_vocoder_directory):
+        print(f"ERRORE: Directory del Vocoder '{path_to_vocoder_directory}' non trovata!")
+        print("  Assicurati che il repository clonato contenga 'useful_ckpts/bigvnat/'.")
         sys.exit(1)
-    if not os.path.exists(os.path.join(os.path.dirname(path_to_vocoder_generator_file), "config.json")):
+
+    expected_vocoder_weights_file = os.path.join(path_to_vocoder_directory, "best_netG.pt")
+    if not os.path.exists(expected_vocoder_weights_file):
+        print(f"ERRORE: File pesi Vocoder '{expected_vocoder_weights_file}' non trovato.")
+        sys.exit(1)
+
+    # Dato che il tuo VocoderBigVGAN.py cerca "args.yml":
+    expected_vocoder_config_file = os.path.join(path_to_vocoder_directory, "args.yml")
+    if not os.path.exists(expected_vocoder_config_file):
+        print(f"ERRORE: File di configurazione Vocoder '{expected_vocoder_config_file}' (args.yml) non trovato.")
+        sys.exit(1)
+
+    print(f"Tentativo di caricare il Vocoder dalla directory: {path_to_vocoder_directory}")
+    print(f"  File pesi atteso: '{os.path.basename(expected_vocoder_weights_file)}'")
+    print(f"  File config atteso: '{os.path.basename(expected_vocoder_config_file)}'")
+
+    try:
+        # Passa la DIRECTORY alla classe VocoderBigVGAN
+        vocoder = VocoderBigVGAN(ckpt_vocoder=path_to_vocoder_directory, device=device)
+        print(f"Vocoder caricato con successo.")
+    except FileNotFoundError as e_vocoder_init:
+        print(f"ERRORE INTERNO A VocoderBigVGAN durante l'inizializzazione (FileNotFound): {e_vocoder_init}")
+        print("  Questo errore proviene dalla classe VocoderBigVGAN stessa.")
+        print(f"  Verifica che il codice VocoderBigVGAN in '{directory}/vocoder/bigvgan/models.py'")
         print(
-            f"ERRORE: File config.json del Vocoder non trovato in '{os.path.dirname(path_to_vocoder_generator_file)}'!")
+            f"  cerchi correttamente '{os.path.basename(expected_vocoder_weights_file)}' e '{os.path.basename(expected_vocoder_config_file)}'")
+        print(f"  all'interno della directory '{path_to_vocoder_directory}'.")
         sys.exit(1)
-
-    vocoder = VocoderBigVGAN(path_to_vocoder_generator_file, device)
-    print(f"Vocoder caricato da: {path_to_vocoder_generator_file}")
-
-    # Rimuovi la logica di 'root' hardcoded
-    # if os.path.exists('/apdcephfs/share_1316500/nlphuang/data/video_to_audio/vggsound/split_txt'):
-    #     root = '/apdcephfs'
-    # else:
-    #     root = '/apdcephfs_intern'
+    except Exception as e_vocoder_generic:
+        print(f"ERRORE generico durante l'inizializzazione di VocoderBigVGAN: {e_vocoder_generic}")
+        sys.exit(1)
+    # --- Fine Gestione Path Vocoder ---
 
     spec_list1 = []
     video_list1 = []
 
-    ### MODIFICA START: Logica per caricare il dataset "custom" ###
     if opt.test_dataset == 'custom':
-        print(f"Caricamento dataset custom dai path forniti:")
-        print(f"  Lista file: {opt.custom_data_list_txt}")
-        print(f"  Dir feature visive: {opt.custom_visual_features_dir}")
-        print(f"  Dir mel GT audio: {opt.custom_audio_mels_gt_dir}")
+        print(f"\nCaricamento dataset 'custom' dai path specificati:")
+        print(f"  Lista file campioni: {opt.custom_data_list_txt}")
+        print(f"  Directory feature visive: {opt.custom_visual_features_dir}")
+        print(f"  Directory mel GT audio: {opt.custom_audio_mels_gt_dir}")
 
         if not os.path.exists(opt.custom_data_list_txt):
             print(f"ERRORE: File lista custom non trovato: {opt.custom_data_list_txt}")
@@ -257,376 +255,265 @@ def main():
 
         with open(opt.custom_data_list_txt, "r") as f:
             data_list1 = f.readlines()
-            data_list1 = [x.strip() for x in data_list1 if x.strip()]  # Rimuovi whitespace e righe vuote
+            data_list1 = [x.strip() for x in data_list1 if x.strip()]
 
-        # Costruisci i path completi ai file di feature
-        # Assumiamo che data_list1 contenga i nomi base dei file (es. "video1", "video2")
         spec_list1 = [os.path.join(opt.custom_audio_mels_gt_dir, base_name + "_mel.npy") for base_name in data_list1]
-        # Adatta l'estensione per le visual features se usi .npy invece di .npz
+        # Assumiamo che le feature visive siano .npz con chiave 'feat', come per vggsound nello script originale
         video_list1 = [os.path.join(opt.custom_visual_features_dir, base_name + ".npz") for base_name in data_list1]
-        # Se salvi le visual features come .npy:
+        # Se le tue feature visive sono .npy, commenta la riga sopra e decommenta questa:
         # video_list1 = [os.path.join(opt.custom_visual_features_dir, base_name + ".npy") for base_name in data_list1]
 
-        # Verifica che i file esistano (opzionale, ma buon debug)
-        for p in spec_list1 + video_list1:
-            if not os.path.exists(p):
-                print(f"ATTENZIONE: File di feature atteso non trovato: {p}")
-                # Potresti voler rimuovere il campione dalla lista o dare errore
-    ### MODIFICA END ###
+        print(f"Trovati {len(data_list1)} campioni custom da processare.")
+        # Verifica esistenza file per il primo campione (debug)
+        if data_list1:
+            print(f"  Verifica per il primo campione '{data_list1[0]}':")
+            print(f"    Path Mel GT: {spec_list1[0]} (Esiste? {os.path.exists(spec_list1[0])})")
+            print(f"    Path Visual Feat: {video_list1[0]} (Esiste? {os.path.exists(video_list1[0])})")
 
-    elif opt.test_dataset == 'vggsound':
-        # Manteniamo la logica originale ma con un warning sui path hardcoded
+    # Rimuoviamo la logica 'root' e i dataset hardcoded per VGGsound ecc.
+    # Se vuoi testare con quelli, dovrai scaricare i loro dati e adattare i path.
+    # Per ora, ci concentriamo sull'opzione 'custom'.
+    elif opt.test_dataset in ['vggsound', 'landscape', 'Aist', 'yt4m']:
         print(
-            "ATTENZIONE: Stai usando il dataset 'vggsound' con path hardcoded. Questo fallirà se non sei nell'ambiente originale.")
-        root = '/apdcephfs_intern'  # Scegli uno dei root originali, probabilmente fallirà comunque
-        split, data = f'{root}/share_1316500/nlphuang/data/video_to_audio/vggsound/split_txt', f'{root}/share_1316500/nlphuang/data/video_to_audio/vggsound/'
-        dataset1_spec_dir = os.path.join(data, "mel_maa2", "npy")
-        dataset1_feat_dir = os.path.join(data, "cavp")
-
-        with open(os.path.join(split, 'vggsound_test.txt'), "r") as f:
-            data_list1 = f.readlines()
-            data_list1 = list(map(lambda x: x.strip(), data_list1))
-            spec_list1 = list(map(lambda x: os.path.join(dataset1_spec_dir, x) + "_mel.npy", data_list1))
-            video_list1 = list(map(lambda x: os.path.join(dataset1_feat_dir, x) + ".npz", data_list1))
-
-    # Aggiungi qui gli altri blocchi elif per 'landscape', 'Aist', 'yt4m' se vuoi mantenerli,
-    # ma probabilmente daranno errore a causa dei path /apdcephfs.
-    # Per ora, li omettiamo per brevità, concentrandoci su 'custom'.
-
+            f"ATTENZIONE: La logica per il dataset '{opt.test_dataset}' usa path hardcoded che probabilmente non funzioneranno.")
+        print("  Questo script è stato modificato per favorire l'opzione '--test_dataset custom'.")
+        print("  Se vuoi usare un dataset standard, dovrai scaricarlo e modificare i path qui.")
+        # Qui potresti mettere la logica originale per quei dataset, ma con path modificabili
+        # o dare direttamente errore. Per ora, diamo errore.
+        sys.exit(f"Dataset '{opt.test_dataset}' non supportato con path locali in questa versione modificata.")
     else:
-        # Modificato per dare un errore più specifico se non è 'custom' o un altro dataset noto.
-        if opt.test_dataset not in ['vggsound', 'landscape', 'Aist', 'yt4m']:  # Aggiungi altri se li implementi
-            print(
-                f"ERRORE: --test_dataset '{opt.test_dataset}' non supportato o non implementato correttamente in questo script modificato.")
-        else:
-            print(
-                f"ERRORE: Logica per --test_dataset '{opt.test_dataset}' non completamente implementata o usa path hardcoded.")
-        sys.exit(1)  # Esce se il dataset non è gestito
-
-    if not video_list1:
-        print(
-            f"ERRORE: Nessun file video/feature da processare per test_dataset='{opt.test_dataset}'. Controlla i path e il file lista.")
+        print(f"ERRORE: --test_dataset '{opt.test_dataset}' non riconosciuto. Usa 'custom' o implementa altri dataset.")
         sys.exit(1)
 
-    # Lettura parametri dal config (già fatta in parte nello script di estrazione, ma utile averli qui)
-    sr = opt.sample_rate  # Usa quello da riga di comando per l'output wav
+    if not video_list1:  # Dovrebbe essere data_list1 qui
+        print(
+            f"ERRORE: Nessun campione da processare per test_dataset='{opt.test_dataset}'. Controlla i path e il file lista.")
+        sys.exit(1)
 
-    # Questi vengono dal config YAML del modello V2A
+    # Lettura parametri dal config YAML
+    sr = opt.sample_rate
+
     cfg_data_train_dataset = config['data']['params']['train']['params']['dataset_cfg']
-    duration = cfg_data_train_dataset['duration']
-    # truncate = cfg_data_train_dataset['truncate'] # 'truncate' qui è in campioni audio, non frame visivi
-    fps = cfg_data_train_dataset['fps']
-    hop_len = cfg_data_train_dataset['hop_len']
+    duration = float(cfg_data_train_dataset['duration'])  # Assicura sia float
+    fps = int(cfg_data_train_dataset['fps'])
+    hop_len = int(cfg_data_train_dataset['hop_len'])
 
-    # 'truncate' nel config YAML si riferisce a campioni audio (es. 131072).
-    # Lo script originale calcola truncate_frame per le feature visive in un modo un po' strano:
-    # truncate_frame = int(fps * truncate / sr)
-    # Questo sembra voler allineare un troncamento audio a frame visivi.
-    # Per CFM, il modello è un ODE solver, potrebbe non aver bisogno di questo troncamento rigido
-    # se gestisce sequenze di lunghezza variabile o se la lunghezza è fissata da 'opt.length'.
-    # Per il momento, manteniamo una logica di troncamento simile se opt.length non è specificato,
-    # usando una lunghezza di finestra basata su seq_len del cond_stage_config.
+    # Parametri globali audio per il fallback di spec_raw (se il caricamento del mel GT fallisce)
+    # Questi dovrebbero essere già stati usati per creare i tuoi mel GT.
+    # Sarebbe meglio leggerli direttamente dal config come fatto nello script di estrazione.
+    # Per ora, assumiamo che siano consistenti.
+    # AUDIO_N_MELS = config['model']['params']['first_stage_config']['params']['ddconfig']['in_channels']
+    # AUDIO_TARGET_SR_FOR_MEL_FALLBACK = config['data']['params']['train']['params']['dataset_cfg']['sr']
+    # VIDEO_DURATION_SECONDS_FOR_MEL_FALLBACK = config['data']['params']['train']['params']['dataset_cfg']['duration']
+    # AUDIO_HOP_LENGTH_FOR_MEL_FALLBACK = config['data']['params']['train']['params']['dataset_cfg']['hop_len']
+    # Se AUDIO_N_MELS etc. non sono accessibili qui, dovrai passarli o definirli.
+    # Per ora, usiamo valori fissi come nello script originale per il fallback.
+    N_MELS_FALLBACK = 80  # Dovrebbe corrispondere a config['model']['params']['first_stage_config']['params']['ddconfig']['in_channels']
+    MEL_LEN_FALLBACK_FRAMES = 625  # Corrisponde a 10s a 16kHz con hop 256 (16000 * 10 / 256)
+    # Calcoliamolo dinamicamente se possibile:
+    try:
+        n_mels_from_cfg = int(config['model']['params']['first_stage_config']['params']['ddconfig']['in_channels'])
+        sr_data_from_cfg = int(cfg_data_train_dataset['sr'])
+        duration_data_from_cfg = float(cfg_data_train_dataset['duration'])
+        hop_len_data_from_cfg = int(cfg_data_train_dataset['hop_len'])
+        N_MELS_FALLBACK = n_mels_from_cfg
+        MEL_LEN_FALLBACK_FRAMES = int(sr_data_from_cfg * duration_data_from_cfg / hop_len_data_from_cfg)
+        print(f"Fallback Mel GT: N_MELS={N_MELS_FALLBACK}, LEN_FRAMES={MEL_LEN_FALLBACK_FRAMES}")
+    except Exception as e_fallback_cfg:
+        print(
+            f"WARN: Impossibile leggere parametri per fallback Mel GT dal config: {e_fallback_cfg}. Uso default 80x625.")
+        N_MELS_FALLBACK = 80
+        MEL_LEN_FALLBACK_FRAMES = 625
 
-    # Lunghezza della sequenza di feature visive attesa dall'encoder del modello
-    visual_feat_seq_len = config['model']['params']['cond_stage_config']['params'].get('seq_len', int(fps * duration))
-    # Se opt.length è specificato (lunghezza mel output), dobbiamo adattare la finestra
-    # Se non specificato, processiamo l'intera durata (o la seq_len dell'encoder visivo)
+    # Lunghezza della finestra per le feature visive
+    visual_feat_seq_len = int(
+        config['model']['params']['cond_stage_config']['params'].get('seq_len', int(fps * duration)))
+    truncate_frame_visual = visual_feat_seq_len
+    print(f"Lunghezza finestra per feature visive (truncate_frame_visual): {truncate_frame_visual}")
 
-    # truncate_frame è la dimensione della finestra per processare le feature visive.
-    # Se opt.length (per l'output mel) non è specificato, usiamo visual_feat_seq_len come dimensione della finestra.
-    # Se opt.length è specificato, il modello UNet/DiT potrebbe essere configurato per quella lunghezza.
-    # La logica originale per 'truncate_frame' era confusa. Semplifichiamo:
-    # Se il modello ha un max_len per le feature visive (cond_stage_config.params.seq_len), usiamo quello.
-    truncate_frame_visual = visual_feat_seq_len  # Numero di frame visivi da processare alla volta
-
-    if opt.scale != 1:
-        ### MODIFICA START: Usa il path custom per empty_vid.npz ###
+    uc = None  # Inizializza uc
+    if opt.scale != 1.0:
         empty_vid_actual_path = opt.custom_empty_vid_path
         if not os.path.exists(empty_vid_actual_path):
             print(f"ERRORE: File empty_vid.npz non trovato in '{empty_vid_actual_path}'. Necessario per scale != 1.0.")
             sys.exit(1)
         print(f"Caricamento unconditional features da: {empty_vid_actual_path}")
         unconditional_np = np.load(empty_vid_actual_path)['feat'].astype(np.float32)
-        ### MODIFICA END ###
 
-        # La lunghezza attesa per le feature incondizionate dovrebbe corrispondere a truncate_frame_visual
         expected_uncond_len = truncate_frame_visual
         if unconditional_np.shape[0] < expected_uncond_len:
-            print(f"Tiling unconditional features da {unconditional_np.shape[0]} a {expected_uncond_len} frames.")
+            print(f"  Tiling unconditional features da {unconditional_np.shape[0]} a {expected_uncond_len} frames.")
             unconditional_np = np.tile(unconditional_np,
                                        (math.ceil(expected_uncond_len / unconditional_np.shape[0]), 1))
         unconditional_np = unconditional_np[:expected_uncond_len]
 
         unconditional = torch.from_numpy(unconditional_np).unsqueeze(0).to(device)
-        # Non c'è bisogno di un ulteriore troncamento qui se unconditional_np ha già la lunghezza truncate_frame_visual
-        # unconditional = unconditional[:, :truncate_frame_visual] # Originale era :truncate_frame
         uc = model.get_learned_conditioning(unconditional)
-        print(f"Unconditional conditioning (uc) preparato. Shape: {unconditional.shape}")
-    else:
-        uc = None  # Assicurati che uc sia definito
+        print(f"Unconditional conditioning (uc) preparato. Input shape: {unconditional.shape}")
 
-    # Gestione della lunghezza della sequenza di output mel (se specificata)
     output_mel_shape = None
-    if opt.length is not None:  # opt.length è in numero di frame mel
+    if opt.length is not None:
         output_mel_shape = (1, config['model']['params']['mel_dim'], opt.length)
         print(f"Override forma output mel a: {output_mel_shape}")
-
-        # La parte di ntk_factor per DiT a lunghezza variabile
-        # Questa parte adatta le embedding posizionali del DiT se opt.length è diverso da mel_length di addestramento
-        from ldm.modules.diffusionmodules.flag_large_dit_moe import VideoFlagLargeDiT  # Assicurati sia il DiT corretto
-
-        # mel_length di addestramento (dal config del modello, non dei dati)
+        # Logica NTK RoPE (come prima)
+        from ldm.modules.diffusionmodules.flag_large_dit_moe import VideoFlagLargeDiT
         training_mel_length = config['model']['params']['mel_length']
         ntk_factor = opt.length // training_mel_length
-
-        if ntk_factor > 1 and hasattr(model.model.diffusion_model, 'freqs_cis'):  # Controlla se il DiT ha freqs_cis
+        if ntk_factor > 1 and hasattr(model.model.diffusion_model, 'freqs_cis'):
             print(f"Adattamento RoPE per lunghezza output mel {opt.length} (ntk_factor={ntk_factor})...")
             dit_hidden_size = config['model']['params']['unet_config']['params']['hidden_size']
             dit_num_heads = config['model']['params']['unet_config']['params']['num_heads']
-            # max_len qui è la max_len del DiT, non necessariamente opt.length.
-            # Dovrebbe essere la lunghezza massima per cui le RoPE sono state precalcolate o possono essere estese.
-            # Usiamo la max_len definita nel config dell'UNet.
             dit_max_len_rope = config['model']['params']['unet_config']['params']['max_len']
-
-            # Se opt.length > dit_max_len_rope, il ntk scaling potrebbe essere applicato a una base
-            # di lunghezza dit_max_len_rope, e poi si spera che il modello generalizzi.
-            # O, idealmente, max_len per precompute_freqs_cis dovrebbe essere la nuova opt.length.
-            # Per ora, usiamo dit_max_len_rope come base per lo scaling ntk.
-
             model.model.diffusion_model.freqs_cis = VideoFlagLargeDiT.precompute_freqs_cis(
-                dit_hidden_size // dit_num_heads,
-                dit_max_len_rope,
-                # Max len per cui calcolare le RoPE, potrebbe essere opt.length se si vuole precisione
-                ntk_factor=ntk_factor
-            )
-            print(
-                f"RoPE (freqs_cis) nel DiT aggiornate con ntk_factor={ntk_factor} per max_len_rope={dit_max_len_rope}.")
-        elif ntk_factor <= 1:
-            print(
-                f"Lunghezza output mel ({opt.length}) <= lunghezza di addestramento ({training_mel_length}). Nessun scaling NTK RoPE necessario.")
-        else:
-            print(
-                f"WARN: Impossibile applicare scaling NTK RoPE (DiT potrebbe non averle o opt.length non è significativamente maggiore).")
+                dit_hidden_size // dit_num_heads, dit_max_len_rope, ntk_factor=ntk_factor)
+            print(f"RoPE (freqs_cis) aggiornate con ntk_factor={ntk_factor} per max_len_rope={dit_max_len_rope}.")
+        # ... (altri print per ntk_factor)
 
-    total_samples_to_process = len(spec_list1)
-    print(f"Inizio processamento di {total_samples_to_process} campioni...")
+    total_samples_to_process = len(data_list1)  # Usa data_list1 che è stata popolata
+    print(f"\nInizio processamento di {total_samples_to_process} campioni...")
 
-    for i_sample, (spec_path, video_feat_path) in enumerate(zip(spec_list1, video_list1)):
-        name = Path(video_feat_path).stem
-        print(f"\nProcessando campione {i_sample + 1}/{total_samples_to_process}: {name}")
+    for i_sample, sample_base_name in enumerate(data_list1):  # Itera sui nomi base
+        current_spec_path = os.path.join(opt.custom_audio_mels_gt_dir, sample_base_name + "_mel.npy")
+        current_video_feat_path = os.path.join(opt.custom_visual_features_dir, sample_base_name + ".npz")  # o .npy
+        # Se usi .npy per le feature visive:
+        # current_video_feat_path = os.path.join(opt.custom_visual_features_dir, sample_base_name + ".npy")
 
-        # Skip se l'output esiste già (utile per riprendere run interrotte)
-        # Controlla solo il file .wav generato, non il _gt.wav
-        if os.path.exists(os.path.join(opt.outdir, name + f'_0.wav')):  # Assumendo idx=0 se non c'è loop n_samples
-            print(f"  Output già esistente, skipping: {name}")
+        name_stem = sample_base_name  # Usiamo il nome base per i file di output
+        print(f"\nProcessando campione {i_sample + 1}/{total_samples_to_process}: {name_stem}")
+        print(f"  Mel GT da: {current_spec_path}")
+        print(f"  Visual Feat da: {current_video_feat_path}")
+
+        if os.path.exists(os.path.join(opt.outdir, name_stem + f'_0.wav')):
+            print(f"  Output già esistente, skipping: {name_stem}")
             continue
 
-        # Caricamento mel-spettrogramma ground truth (spec_raw)
         try:
-            spec_raw_np = np.load(spec_path).astype(np.float32)
-            print(f"  Mel GT caricato da '{spec_path}'. Shape: {spec_raw_np.shape}")
+            spec_raw_np = np.load(current_spec_path).astype(np.float32)
         except Exception as e_load_spec:
-            print(f"  ERRORE: Impossibile caricare mel GT da '{spec_path}': {e_load_spec}. Uso zeri.")
-            # Calcola la lunghezza attesa dei frame mel per il ground truth
-            # expected_mel_gt_len_frames = int(sr * duration / hop_len) # sr, duration, hop_len dal config dati
-            # Per ora, usiamo una shape di fallback fissa se il caricamento fallisce, come l'originale.
-            # Questo dovrebbe essere raro se lo script di estrazione mel funziona.
-            # La shape originale era (80, 625). 80 è N_MELS. 625 frames * 256 hop / 16000 sr = 10 secondi.
-            # Quindi 625 è corretto per 10s, 16kHz, hop 256.
-            expected_mel_gt_len_frames = int(
-                AUDIO_TARGET_SR * VIDEO_DURATION_SECONDS / AUDIO_HOP_LENGTH)  # Usa le var globali definite per l'estrazione audio
-            spec_raw_np = np.zeros((AUDIO_N_MELS, expected_mel_gt_len_frames), dtype=np.float32)
-            print(f"  Usando mel GT di zeri. Shape: {spec_raw_np.shape}")
+            print(f"  ERRORE: Impossibile caricare mel GT da '{current_spec_path}': {e_load_spec}. Uso zeri.")
+            spec_raw_np = np.zeros((N_MELS_FALLBACK, MEL_LEN_FALLBACK_FRAMES), dtype=np.float32)
+        print(f"  Mel GT caricato/fallback. Shape: {spec_raw_np.shape}")
 
-        # Caricamento feature visive (video_feat)
         try:
-            # Adatta questo se hai salvato come .npy invece di .npz
-            if video_feat_path.endswith(".npz"):
-                video_feat_np = np.load(video_feat_path)['feat'].astype(np.float32)
-            elif video_feat_path.endswith(".npy"):
-                video_feat_np = np.load(video_feat_path).astype(np.float32)
+            if current_video_feat_path.endswith(".npz"):
+                video_feat_np = np.load(current_video_feat_path)['feat'].astype(np.float32)
+            elif current_video_feat_path.endswith(".npy"):
+                video_feat_np = np.load(current_video_feat_path).astype(np.float32)
             else:
-                raise ValueError(f"Formato file feature visive non riconosciuto: {video_feat_path}")
-            print(f"  Feature visive caricate da '{video_feat_path}'. Shape: {video_feat_np.shape}")
+                raise ValueError(f"Formato file non riconosciuto: {current_video_feat_path}")
         except Exception as e_load_vf:
-            print(f"  ERRORE CRITICO: Impossibile caricare feature visive da '{video_feat_path}': {e_load_vf}.")
-            print(f"  Skipping campione {name}.")
-            continue  # Salta al prossimo campione
+            print(f"  ERRORE CRITICO caricando feature visive da '{current_video_feat_path}': {e_load_vf}. Skipping.")
+            continue
+        print(f"  Feature visive caricate. Shape: {video_feat_np.shape}")
 
-        # Tiling/Padding per spec_raw (GT mel)
-        # spec_len è il numero di frame mel attesi per la 'duration' completa
-        spec_len_frames_expected = int(
-            sr * duration / hop_len)  # sr è opt.sample_rate, duration e hop_len dal config dati
+        spec_len_frames_expected = int(sr * duration / hop_len)
         if spec_raw_np.shape[1] < spec_len_frames_expected:
-            print(f"  Tiling mel GT da {spec_raw_np.shape[1]} a {spec_len_frames_expected} frames.")
             spec_raw_np = np.tile(spec_raw_np, (1, math.ceil(spec_len_frames_expected / spec_raw_np.shape[1])))
         spec_raw_np = spec_raw_np[:, :spec_len_frames_expected]
-        print(f"  Mel GT (spec_raw) final shape: {spec_raw_np.shape}")
 
-        # Tiling/Padding per video_feat
-        # feat_len_frames_expected è il numero di frame visivi attesi (es. 40 per 10s a 4fps)
-        feat_len_frames_expected = int(fps * duration)  # fps e duration dal config dati
+        feat_len_frames_expected = int(fps * duration)
         if video_feat_np.shape[0] < feat_len_frames_expected:
-            print(f"  Tiling visual features da {video_feat_np.shape[0]} a {feat_len_frames_expected} frames.")
             video_feat_np = np.tile(video_feat_np, (math.ceil(feat_len_frames_expected / video_feat_np.shape[0]), 1))
         video_feat_np = video_feat_np[:feat_len_frames_expected]
-        print(f"  Visual features (video_feat) final shape: {video_feat_np.shape}")
 
-        # Conversione a tensori PyTorch
         spec_raw_torch = torch.from_numpy(spec_raw_np).unsqueeze(0).to(device)
         video_feat_torch = torch.from_numpy(video_feat_np).unsqueeze(0).to(device)
+        print(f"  Mel GT (tensor) shape: {spec_raw_torch.shape}, Visual Feat (tensor) shape: {video_feat_torch.shape}")
 
-        # Logica di windowing per processare video lunghi a pezzi (usando truncate_frame_visual)
-        # Se il video è già della lunghezza giusta (truncate_frame_visual), window_num sarà 1.
         current_video_feat_len_frames = video_feat_torch.shape[1]
-        window_num = math.ceil(
-            current_video_feat_len_frames / truncate_frame_visual)  # Usa ceil per coprire l'ultimo pezzo
-        print(
-            f"  Numero di finestre da processare (basato su truncate_frame_visual={truncate_frame_visual}): {window_num}")
+        window_num = math.ceil(current_video_feat_len_frames / truncate_frame_visual)
+        print(f"  Numero di finestre da processare (truncate_frame_visual={truncate_frame_visual}): {window_num}")
 
         gt_mel_chunks_list, generated_mel_chunks_list = [], []
-
-        for i_window in tqdm(range(window_num), desc=f"  Finestre per {name}"):
-            # Calcola start/end per le feature visive per questa finestra
+        for i_window in tqdm(range(window_num), desc=f"    Finestre per {name_stem}"):
             vf_start = i_window * truncate_frame_visual
             vf_end = min((i_window + 1) * truncate_frame_visual, current_video_feat_len_frames)
             current_video_feat_chunk = video_feat_torch[:, vf_start:vf_end]
 
-            # Se l'ultimo chunk è più corto di truncate_frame_visual, fai padding (necessario per 'uc')
-            if current_video_feat_chunk.shape[1] < truncate_frame_visual:
+            if current_video_feat_chunk.shape[
+                1] < truncate_frame_visual and opt.scale != 1.0:  # Padding solo se si usa CFG e il chunk è corto
                 padding_size = truncate_frame_visual - current_video_feat_chunk.shape[1]
-                padding = torch.zeros(current_video_feat_chunk.shape[0], padding_size,
-                                      current_video_feat_chunk.shape[2]).to(device)
-                current_video_feat_chunk = torch.cat([current_video_feat_chunk, padding], dim=1)
-                print(f"    Finestra {i_window}: Chunk visivo paddato a shape {current_video_feat_chunk.shape}")
+                padding_vf = torch.zeros(current_video_feat_chunk.shape[0], padding_size,
+                                         current_video_feat_chunk.shape[2]).to(device)
+                current_video_feat_chunk = torch.cat([current_video_feat_chunk, padding_vf], dim=1)
 
-            # Calcola start/end corrispondenti per lo spettrogramma audio GT
-            # Questo allinea l'audio GT alla finestra delle feature visive
-            # (sr e hop_len sono per l'audio, fps per il video)
             audio_frames_per_visual_frame = (sr / hop_len) / fps
-
             mel_gt_start = int(vf_start * audio_frames_per_visual_frame)
             mel_gt_end = int(vf_end * audio_frames_per_visual_frame)
-            # Assicurati che mel_gt_end non superi la lunghezza di spec_raw_torch
             mel_gt_end = min(mel_gt_end, spec_raw_torch.shape[2])
             current_gt_mel_chunk = spec_raw_torch[:, :, mel_gt_start:mel_gt_end]
 
-            print(
-                f"    Finestra {i_window}: Chunk visivo shape {current_video_feat_chunk.shape}, Chunk Mel GT shape {current_gt_mel_chunk.shape}")
-
-            # Ottieni condizionamento dalle feature visive del chunk corrente
             c = model.get_learned_conditioning(current_video_feat_chunk)
 
-            # Determina la shape di output per questa finestra
-            # Se output_mel_shape (basato su opt.length) è specificato, usalo.
-            # Altrimenti, la shape di output dovrebbe corrispondere alla lunghezza del chunk GT mel.
-            current_output_mel_shape = output_mel_shape
-            if current_output_mel_shape is None:  # Se opt.length non è specificato
-                # La shape dell'output mel generato dovrebbe corrispondere a quella del GT per questa finestra
-                if current_gt_mel_chunk.shape[2] > 0:  # Solo se ci sono frame GT
-                    current_output_mel_shape = (1, config['model']['params']['mel_dim'], current_gt_mel_chunk.shape[2])
-                else:  # Se non ci sono frame GT (es. vf_end è troppo piccolo), salta o genera una lunghezza minima
-                    print(
-                        f"    WARN: Finestra {i_window} non ha frame Mel GT corrispondenti. Potrebbe generare audio vuoto o di lunghezza default.")
-                    # Potresti decidere di saltare questa finestra se non ci sono frame audio GT
-                    # o usare una lunghezza minima/default se il modello può gestirla.
-                    # Per ora, se non c'è GT, non possiamo definire current_output_mel_shape basato su di esso.
-                    # Il modello.sample potrebbe usare una sua lunghezza default se shape=None.
-                    # Per CFM, la lunghezza è solitamente definita dalla ODE.
-                    # Lo script originale non gestiva shape=None per CFM in modo dinamico basato sul chunk.
-                    # Se opt.length non è dato, la lunghezza dell'output è determinata dalla lunghezza
-                    # delle feature di condizionamento passate all'ODE (implicito in cfm1_audio.py).
-                    # Il modello dovrebbe generare una lunghezza coerente con current_video_feat_chunk.
-                    pass  # Lascia current_output_mel_shape a None, il modello deciderà.
+            current_output_mel_shape_window = None  # Inizializza per questa finestra
+            if output_mel_shape is not None:  # Se opt.length è dato, usiamo una frazione di esso per la finestra
+                # La lunghezza mel per questa finestra dovrebbe corrispondere a current_gt_mel_chunk
+                # se opt.length non è specificato. Se è specificato, dobbiamo calcolare la
+                # lunghezza corrispondente per questo chunk.
+                # Questo è complesso se opt.length non è un multiplo di window_num.
+                # Per CFM, la lunghezza è spesso determinata dall'input condizionante.
+                # Se usiamo opt.length, dobbiamo capire come il modello lo gestisce per i chunk.
+                # Per ora, se opt.length è dato, passiamolo direttamente (il modello potrebbe troncare/paddare).
+                # Questa parte potrebbe necessitare di un'ulteriore revisione se l'output non ha la lunghezza attesa.
+                # Lo script originale sembrava usare 'shape' (output_mel_shape) per l'intera sequenza.
+                # Ma qui processiamo a finestre.
+                # Se opt.length è dato, è per l'INTERA sequenza.
+                # Quindi, per il chunk, la lunghezza dovrebbe essere la lunghezza del GT di questo chunk.
+                if current_gt_mel_chunk.shape[2] > 0:
+                    current_output_mel_shape_window = (
+                    1, config['model']['params']['mel_dim'], current_gt_mel_chunk.shape[2])
+            # Se current_output_mel_shape_window è ancora None, significa che il modello deciderà la lunghezza
+            # basandosi su 'c' o la sua lunghezza di addestramento se 'shape' è None in model.sample/sample_cfg.
 
-            print(f"    Finestra {i_window}: Sampling con output_mel_shape: {current_output_mel_shape}")
-            if opt.scale == 1:  # w/o cfg
-                sample, _ = model.sample(c, 1, timesteps=opt.ddim_steps, shape=current_output_mel_shape)
-            else:  # cfg
-                if uc is None:
-                    print(
-                        "ERRORE: 'uc' (unconditional conditioning) è None ma scale != 1.0. Assicurati che empty_vid.npz sia processato.")
-                    sys.exit(1)
+            if opt.scale == 1.0:
+                sample, _ = model.sample(c, 1, timesteps=opt.ddim_steps, shape=current_output_mel_shape_window)
+            else:
                 sample, _ = model.sample_cfg(c, opt.scale, uc, 1, timesteps=opt.ddim_steps,
-                                             shape=current_output_mel_shape)
+                                             shape=current_output_mel_shape_window)
 
             x_samples_ddim = model.decode_first_stage(sample)
 
-            # Se abbiamo paddato current_video_feat_chunk, l'output x_samples_ddim potrebbe essere più lungo
-            # del current_gt_mel_chunk. Tronchiamo x_samples_ddim per farlo corrispondere a current_gt_mel_chunk
-            # se current_gt_mel_chunk ha una lunghezza valida.
-            if current_gt_mel_chunk.shape[2] > 0 and x_samples_ddim.shape[2] > current_gt_mel_chunk.shape[2]:
-                print(
-                    f"    Finestra {i_window}: Tronco mel generato da {x_samples_ddim.shape[2]} a {current_gt_mel_chunk.shape[2]} frames.")
-                x_samples_ddim = x_samples_ddim[:, :, :current_gt_mel_chunk.shape[2]]
+            # Tronca/padda l'output per farlo corrispondere al GT del chunk se necessario
+            if current_gt_mel_chunk.shape[2] > 0:
+                if x_samples_ddim.shape[2] > current_gt_mel_chunk.shape[2]:
+                    x_samples_ddim = x_samples_ddim[:, :, :current_gt_mel_chunk.shape[2]]
+                elif x_samples_ddim.shape[2] < current_gt_mel_chunk.shape[2]:
+                    padding_mel = torch.zeros(x_samples_ddim.shape[0], x_samples_ddim.shape[1],
+                                              current_gt_mel_chunk.shape[2] - x_samples_ddim.shape[2]).to(device)
+                    x_samples_ddim = torch.cat([x_samples_ddim, padding_mel], dim=2)
 
-            if current_gt_mel_chunk.shape[2] > 0:  # Aggiungi solo se c'è GT
                 generated_mel_chunks_list.append(x_samples_ddim)
                 gt_mel_chunks_list.append(current_gt_mel_chunk)
+            elif x_samples_ddim.shape[2] > 0:  # Se non c'è GT ma abbiamo generato qualcosa
+                generated_mel_chunks_list.append(x_samples_ddim)
+                # Non possiamo aggiungere a gt_mel_chunks_list, ma potremmo voler salvare l'audio generato
 
-        # Concatena i chunk per formare gli spettrogrammi completi
-        syn_mel_full = None
-        gt_mel_full = None
-
-        if len(generated_mel_chunks_list) > 0:
-            # Usa dim=2 per concatenare lungo l'asse temporale (0=batch, 1=mel_bins, 2=time_frames)
+        syn_mel_full, gt_mel_full = None, None
+        if generated_mel_chunks_list:
             syn_mel_full = torch.cat(generated_mel_chunks_list, dim=2)
-            print(f"  Melodia sintetizzata completa concatenata. Shape: {syn_mel_full.shape}")
-        if len(gt_mel_chunks_list) > 0:
+            print(f"  Melodia sintetizzata completa. Shape: {syn_mel_full.shape}")
+        if gt_mel_chunks_list:  # Solo se abbiamo aggiunto chunk GT
             gt_mel_full = torch.cat(gt_mel_chunks_list, dim=2)
-            print(f"  Melodia GT completa concatenata. Shape: {gt_mel_full.shape}")
+            print(f"  Melodia GT completa. Shape: {gt_mel_full.shape}")
 
-        # Se non sono stati generati chunk (es. video troppo corto o problemi)
-        if syn_mel_full is None or gt_mel_full is None:
-            print(f"  ATTENZIONE: Non sono stati generati chunk validi per {name}. Salto la generazione audio.")
-            continue
+        if gt_mel_full is not None and gt_mel_full.shape[2] > 0:
+            spec_gt_for_vocoder = gt_mel_full.squeeze(0).cpu().numpy()
+            wav_gt = vocoder.vocode(spec_gt_for_vocoder)
+            wav_path_gt = os.path.join(opt.outdir, name_stem + f'_0_gt.wav')
+            soundfile.write(wav_path_gt, wav_gt, opt.sample_rate)
+            print(f"  Audio GT salvato: {wav_path_gt}")
 
-        # Il loop originale faceva enumerate(zip(gt_mel, syn_mel))
-        # ma gt_mel e syn_mel erano già gli spettrogrammi completi (batch size 1).
-        # Ora abbiamo syn_mel_full e gt_mel_full che sono [1, mel_bins, total_time_frames]
-
-        # Processa l'intero spettrogramma GT concatenato
-        # Rimuovi la dimensione batch prima di passare al vocoder se si aspetta [mel_bins, time_frames]
-        spec_gt_for_vocoder = gt_mel_full.squeeze(0).cpu().numpy()
-        wav_gt = vocoder.vocode(spec_gt_for_vocoder)
-        wav_path_gt = os.path.join(opt.outdir, name + f'_0_gt.wav')  # idx è 0 perché processiamo l'intero campione
-        soundfile.write(wav_path_gt, wav_gt, opt.sample_rate)
-        print(f"  Audio GT salvato: {wav_path_gt}")
-
-        # Processa l'intero spettrogramma sintetizzato concatenato
-        spec_syn_for_vocoder = syn_mel_full.squeeze(0).cpu().numpy()
-        ddim_wav = vocoder.vocode(spec_syn_for_vocoder)
-        wav_path_syn = os.path.join(opt.outdir, name + f'_0.wav')  # idx è 0
-        soundfile.write(wav_path_syn, ddim_wav, opt.sample_rate)
-        print(f"  Audio sintetizzato salvato: {wav_path_syn}")
+        if syn_mel_full is not None and syn_mel_full.shape[2] > 0:
+            spec_syn_for_vocoder = syn_mel_full.squeeze(0).cpu().numpy()
+            ddim_wav = vocoder.vocode(spec_syn_for_vocoder)
+            wav_path_syn = os.path.join(opt.outdir, name_stem + f'_0.wav')
+            soundfile.write(wav_path_syn, ddim_wav, opt.sample_rate)
+            print(f"  Audio sintetizzato salvato: {wav_path_syn}")
+        elif syn_mel_full is None:
+            print(f"  ATTENZIONE: Nessun mel sintetizzato generato per {name_stem}.")
 
     print(f"\nI tuoi campioni sono pronti e ti aspettano qui: \n{opt.outdir} \nEnjoy.")
 
 
 if __name__ == "__main__":
-    # Definisci qui le variabili globali per i parametri audio se necessario
-    # (se non sono già definite quando chiami main() da un altro script/notebook)
-    # Esempio:
-    # AUDIO_TARGET_SR = 16000
-    # VIDEO_DURATION_SECONDS = 10
-    # AUDIO_HOP_LENGTH = 256
-    # AUDIO_N_MELS = 80
-    # ... ecc.
-    # Queste sarebbero idealmente lette dal config YAML all'inizio dello script main() o globalmente.
-    # Per ora, assumiamo che la logica di caricamento config in main() le renda disponibili
-    # o che lo script di estrazione mel le imposti globalmente se eseguito prima.
-
-    # Per eseguire questo script da riga di comando, dovrai passare gli argomenti corretti, es:
-    # python tuo_script_v2a_modificato.py \
-    #   -b /path/al/tuo/video2audio-cfm-cfg-moe.yaml \
-    #   -r /path/al/tuo/checkpoint_v2a.ckpt \
-    #   --test_dataset custom \
-    #   --custom_data_list_txt /kaggle/working/my_v2a_test_data/my_test_list.txt \
-    #   --custom_visual_features_dir /kaggle/working/my_v2a_test_data/visual_features/ \
-    #   --custom_audio_mels_gt_dir /kaggle/working/my_v2a_test_data/audio_mels_gt/ \
-    #   --custom_empty_vid_path /kaggle/working/my_v2a_test_data/empty_video_data/empty_vid.npz \
-    #   --outdir /kaggle/working/my_v2a_output/ \
-    #   --sample_rate 16000 \
-    #   --scale 3.0 # Esempio se vuoi usare CFG
-
     main()

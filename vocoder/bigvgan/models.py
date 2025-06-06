@@ -533,8 +533,19 @@ class VocoderBigVGAN(nn.Module):  # Falla ereditare da nn.Module per coerenza
         if state_dict_generator is None:
             raise ValueError(f"Impossibile estrarre lo state_dict del generatore dal file: {weights_path}")
 
-        self.generator.load_state_dict(state_dict_generator)
-        print("  Pesi del generatore caricati con successo.")
+        # In VocoderBigVGAN.__init__
+        try:
+            missing_keys, unexpected_keys = self.generator.load_state_dict(state_dict_generator, strict=False)
+            if missing_keys:
+                print(
+                    f"    ATTENZIONE: Chiavi mancanti durante il caricamento dello state_dict del generatore: {missing_keys}")
+            if unexpected_keys:
+                print(
+                    f"    ATTENZIONE: Chiavi inattese durante il caricamento dello state_dict del generatore: {unexpected_keys}")
+            print("  Pesi del generatore caricati con strict=False.")
+        except Exception as e_load_strict_false:
+            print(f"    ERRORE durante il caricamento con strict=False: {e_load_strict_false}")
+            raise
 
         self.generator.eval()
         self.generator.remove_weight_norm()  # Molti modelli GAN usano weight norm in training

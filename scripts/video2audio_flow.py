@@ -208,7 +208,7 @@ def parse_args():
     parser.add_argument(
         "--ddim_steps",
         type=int,
-        default=25,  # Originale, potrebbe essere 50 o 200 per CFM
+        default=50,  # Originale, potrebbe essere 50 o 200 per CFM
         help="number of ddim sampling steps",
     )
     parser.add_argument(

@@ -515,14 +515,9 @@ def main():
             N_MELS_V2A_OUTPUT = x_samples_ddim_np.shape[0]
             [0]
 
-            if N_MELS_V2A_OUTPUT != NV_NUM_MELS:  # NV_NUM_MELS è ora 80
-                # Questo blocco NON dovrebbe essere eseguito se il V2A produce 80 mel.
-                # Se viene eseguito, c'è un problema nella configurazione del V2A.
-                print(f"    ERRORE CRITICO V2A (chunk): Mel V2A ha {N_MELS_V2A_OUTPUT} bande, "
-                      f"ma Vocoder NVIDIA si aspetta {NV_NUM_MELS}. Verifica config V2A!")
-                # Potresti voler fare sys.exit(1) qui o gestire l'errore.
-                # Per ora, la logica di padding/troncamento rimarrebbe come fallback,
-                # ma l'obiettivo è che non serva.
+            if N_MELS_V2A_OUTPUT != NV_NUM_MELS:
+                print(
+                    f"    ATTENZIONE V2A (chunk): Mel V2A ha {N_MELS_V2A_OUTPUT} bande, Vocoder NVIDIA {NV_NUM_MELS}.")
                 if N_MELS_V2A_OUTPUT < NV_NUM_MELS:
                     padding_mels = np.zeros((NV_NUM_MELS - N_MELS_V2A_OUTPUT, x_samples_ddim_np.shape[1]))
                     mel_adapted_for_vocoder_np = np.vstack((x_samples_ddim_np, padding_mels))
@@ -532,22 +527,11 @@ def main():
             else:
                 mel_adapted_for_vocoder_np = x_samples_ddim_np
 
-            # Dentro il loop delle finestre, dopo aver ottenuto x_samples_ddim_np
-            print(f"    DEBUG: Mel V2A (x_samples_ddim_np) PRIMA di log-scaling:")
-            print(f"      Shape: {x_samples_ddim_np.shape}")
-            print(f"      Min: {np.min(x_samples_ddim_np):.4f}, Max: {np.max(x_samples_ddim_np):.4f}, Mean: {np.mean(x_samples_ddim_np):.4f}")
+            log_mel_generated_for_vocoder = np.log(np.clip(mel_adapted_for_vocoder_np, a_min=1e-5, a_max=None))
+            # Converti di nuovo in tensore per la lista (o processa tutto alla fine)
+            generated_mel_chunks_list.append(torch.from_numpy(log_mel_generated_for_vocoder).to(device))
+            # --- FINE BLOCCO ADATTAMENTO MEL ---
 
-            # Poi il tuo log-scaling:
-           # log_mel_generated_for_vocoder = np.log(np.clip(x_samples_ddim_np, a_min=1e-5, a_max=None))
-           # print(f"    DEBUG: Mel V2A DOPO log-scaling:")
-           # print(f"      Shape: {log_mel_generated_for_vocoder.shape}")
-           # print(f"      Min: {np.min(log_mel_generated_for_vocoder):.4f}, Max: {np.max(log_mel_generated_for_vocoder):.4f}, Mean: {np.mean(log_mel_generated_for_vocoder):.4f}")
-
-            spec_syn_for_vocoder = mel_adapted_for_vocoder_np.astype(np.float32)
-            # Questo tensore (spec_syn_for_vocoder) è quello che verrà aggiunto a generated_mel_chunks_list
-            # e poi usato per creare syn_mel_final_for_vocoder
-
-            generated_mel_chunks_list.append(torch.from_numpy(spec_syn_for_vocoder).to(device))
             # Gestione Mel GT per questo chunk (se mel_gt_full_np esiste)
             if mel_gt_full_np is not None:
                 # Calcola i frame mel GT corrispondenti a questo chunk video

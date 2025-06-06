@@ -24,55 +24,113 @@ NVIDIA_VOCODER_CONFIG_JSON_IN_V2A = os.path.join(PATH_TO_NVIDIA_VOCODER_DIR_IN_V
 # Variabili globali per i parametri del vocoder NVIDIA (saranno popolate)
 NV_SR, NV_N_FFT, NV_NUM_MELS, NV_HOP_SIZE, NV_WIN_SIZE, NV_FMIN, NV_FMAX = [None]*7
 
-def load_nvidia_vocoder_params_for_v2a(config_json_path):
-    global NV_SR, NV_N_FFT, NV_NUM_MELS, NV_HOP_SIZE, NV_WIN_SIZE, NV_FMIN, NV_FMAX
+
+# Questa è la versione della funzione che dovrebbe gestire i None per fmax
+# e usare get_int_param per le altre chiavi.
+# Assicurati che sia QUESTA la versione nel tuo script.
+
+def load_nvidia_vocoder_params_for_v2a(config_json_path):  # Rinominata nel tuo script
+    global NV_SR, NV_N_FFT, NV_NUM_MELS, NV_HOP_SIZE, \
+        NV_WIN_SIZE, NV_FMIN, NV_FMAX
+
     if not os.path.exists(config_json_path):
         print(f"ERRORE V2A: File config.json vocoder NVIDIA '{config_json_path}' non trovato.")
         return False
-    import json
-    with open(config_json_path, 'r') as f: config = json.load(f)
+
+    import json  # Assicurati che json sia importato qui o globalmente
+    with open(config_json_path, 'r') as f:
+        config = json.load(f)
+
+        print("--- CONTENUTO RAW DEL CONFIG.JSON CARICATO ---")
+        print(json.dumps(config, indent=2))  # Stampa il JSON formattato
+        print("-------------------------------------------")
+
     try:
-        NV_SR = int(config['sampling_rate'])
-        NV_N_FFT = int(config['n_fft'])
-        NV_NUM_MELS = int(config['num_mels'])
-        NV_HOP_SIZE = int(config['hop_size'])
-        NV_WIN_SIZE = int(config['win_size'])
-        NV_FMIN = int(config.get('fmin', 0))
-        NV_FMAX = int(config.get('fmax', NV_SR // 2))
+        # Funzione helper per caricare int con fallback se None o mancante
+        def get_int_param(cfg_dict, key, default_value=None, is_critical=True):
+            val = cfg_dict.get(key)  # Usa .get() per evitare KeyError se la chiave manca
+            if val is not None:
+                try:
+                    return int(val)  # Converte in int
+                except (ValueError, TypeError):  # Se val non è convertibile in int
+                    if default_value is not None:
+                        print(
+                            f"ATTENZIONE: Valore per '{key}' ('{val}') non è un intero valido, uso default: {default_value}")
+                        return default_value
+                    elif is_critical:
+                        raise ValueError(f"Chiave critica '{key}' ha un valore non intero ('{val}') e nessun default.")
+                    else:
+                        return None  # O 0 per fmin
+            elif default_value is not None:  # Se val è None e c'è un default
+                print(f"ATTENZIONE: Chiave '{key}' non trovata o None nel config, uso default: {default_value}")
+                return default_value
+            elif is_critical:  # Se val è None, non c'è default, ed è critica
+                raise KeyError(f"Chiave critica '{key}' mancante o None nel config e nessun default fornito.")
+            else:  # Non critica, nessun default, restituisci None (o 0 per fmin)
+                print(f"ATTENZIONE: Chiave opzionale '{key}' non trovata o None, sarà gestita come None/0.")
+                return None
 
-        print("--- Parametri Vocoder NVIDIA caricati per V2A ---")
-        print(f"NV_SR       = {NV_SR}")
-        print(f"NV_N_FFT    = {NV_N_FFT}")
-        print(f"NV_NUM_MELS = {NV_NUM_MELS}")
-        print(f"NV_HOP_SIZE = {NV_HOP_SIZE}")
-        print(f"NV_WIN_SIZE = {NV_WIN_SIZE}")
-        print(f"NV_FMIN     = {NV_FMIN}")
-        print(f"NV_FMAX     = {NV_FMAX}")
+        NV_SR = get_int_param(config, 'sampling_rate', is_critical=True)
+        NV_N_FFT = get_int_param(config, 'n_fft', is_critical=True)
+        NV_NUM_MELS = get_int_param(config, 'num_mels', is_critical=True)
+        NV_HOP_SIZE = get_int_param(config, 'hop_size', is_critical=True)
+        NV_WIN_SIZE = get_int_param(config, 'win_size', is_critical=True)
 
+        NV_FMIN = get_int_param(config, 'fmin', default_value=0, is_critical=False)
+        if NV_FMIN is None: NV_FMIN = 0  # Assicura sia int
+
+        fmax_val = config.get('fmax')  # Prendi fmax, potrebbe essere None (null) o un numero
+        if fmax_val is not None:
+            try:
+                NV_FMAX = int(fmax_val)
+            except (ValueError, TypeError):
+                print(f"ATTENZIONE: 'fmax' ('{fmax_val}') non è un intero valido, calcolo come SR/2.")
+                if NV_SR is None: raise ValueError("NV_SR non definito per calcolare FMAX di default.")
+                NV_FMAX = NV_SR // 2
+        else:  # fmax_val è None (chiave mancante o valore null)
+            print(f"ATTENZIONE: 'fmax' è None/null o mancante nel config, calcolo come SR/2.")
+            if NV_SR is None: raise ValueError("NV_SR non definito per calcolare FMAX di default.")
+            NV_FMAX = NV_SR // 2
+
+        # Verifica che tutti i parametri critici siano stati caricati
+        critical_params = {"SR": NV_SR, "N_FFT": NV_N_FFT, "NUM_MELS": NV_NUM_MELS,
+                           "HOP_SIZE": NV_HOP_SIZE, "WIN_SIZE": NV_WIN_SIZE}
+        for name, val_check in critical_params.items():
+            if val_check is None:
+                print(f"ERRORE CRITICO POST-CARICAMENTO: Parametro '{name}' è ancora None.")
+                return False
+
+        print("\n--- Parametri Vocoder NVIDIA Caricati ---")
+        # ... (stampa i parametri) ...
         return True
 
-    except Exception as e: print(f"ERRORE V2A caricamento parametri vocoder NVIDIA: {e}"); return False
-
-# Carica i parametri del vocoder NVIDIA una volta all'inizio
-SUCCESS_LOAD_NVIDIA_PARAMS = load_nvidia_vocoder_params_for_v2a(NVIDIA_VOCODER_CONFIG_JSON_IN_V2A)
-if not SUCCESS_LOAD_NVIDIA_PARAMS:
-    print("ERRORE CRITICO: Impossibile caricare i parametri del vocoder NVIDIA. Uscita.")
-    sys.exit(1) # Esce se non può caricare i parametri del vocoder
-
-# --- AGGIUNTA PER GESTIRE TorchDynamo SU P100 ---
-print(f"PyTorch version (nello script V2A): {torch.__version__}")
-if hasattr(torch, '_dynamo') and hasattr(torch._dynamo, 'config'):
-    print("Applicazione di torch._dynamo.config.suppress_errors = True (nello script V2A)...")
-    try:
-        torch._dynamo.config.suppress_errors = True
-        print(f"torch._dynamo.config.suppress_errors impostato a: {torch._dynamo.config.suppress_errors}")
-    except Exception as e_dynamo_config:
-        print(f"ATTENZIONE: Errore durante l'impostazione di suppress_errors: {e_dynamo_config}")
-else:
-    print("torch._dynamo.config non trovato, procedo senza modifiche a Dynamo.")
-
+    except KeyError as e:  # Questo dovrebbe essere catturato da get_int_param se is_critical=True
+        print(f"ERRORE CRITICO (KeyError): Chiave '{e}' mancante nel config.json e necessaria.")
+        return False
+    except ValueError as e_val:
+        print(f"ERRORE di VALORE durante il caricamento (es. conversione int fallita): {e_val}")
+        return False
+    except Exception as e_load:
+        print(f"ERRORE generico durante il caricamento dei parametri: {e_load}")
+        # import traceback # Togli il commento per debug dettagliato se necessario
+        # traceback.print_exc()
+        return False
 
 # --- FINE AGGIUNTA ---
+
+print("\nDEBUG: Inizio blocco di caricamento parametri globali del vocoder NVIDIA.")
+NVIDIA_VOCODER_CONFIG_JSON_IN_V2A = os.path.join(PATH_TO_NVIDIA_VOCODER_DIR_IN_V2A, "config.json") # Ricontrolla PATH_TO_NVIDIA_VOCODER_DIR_IN_V2A
+
+print(f"DEBUG: Chiamata a load_nvidia_vocoder_params_for_v2a con path: {NVIDIA_VOCODER_CONFIG_JSON_IN_V2A}")
+SUCCESS_LOAD_NVIDIA_PARAMS = load_nvidia_vocoder_params_for_v2a(NVIDIA_VOCODER_CONFIG_JSON_IN_V2A)
+print(f"DEBUG: Valore di SUCCESS_LOAD_NVIDIA_PARAMS dopo la chiamata: {SUCCESS_LOAD_NVIDIA_PARAMS}")
+print(f"DEBUG: Valore di NV_SR dopo la chiamata: {NV_SR}") # Controlla se è stato impostato
+
+if not SUCCESS_LOAD_NVIDIA_PARAMS:
+    print("ERRORE CRITICO (globale): Impossibile caricare i parametri del vocoder NVIDIA. Script terminato ORA.")
+    sys.exit(1)
+else:
+    print("INFO (globale): Parametri Vocoder NVIDIA caricati con successo. NV_SR è impostato.")
 
 
 def load_model_from_config(config, ckpt=None, verbose=True):
@@ -453,12 +511,18 @@ def main():
             x_samples_ddim = model.decode_first_stage(sample)  # Mel generato dal V2A
 
             # --- BLOCCO ADATTAMENTO MEL GENERATO PER VOCODER NVIDIA ---
-            x_samples_ddim_np = x_samples_ddim.squeeze(0).cpu().numpy()
+            x_samples_ddim_np = x_samples_ddim.squeeze(0).cpu().numpy()  # (N_MELS_V2A, T_FRAMES_V2A)
             N_MELS_V2A_OUTPUT = x_samples_ddim_np.shape[0]
+            [0]
 
-            if N_MELS_V2A_OUTPUT != NV_NUM_MELS:
-                print(
-                    f"    ATTENZIONE V2A (chunk): Mel V2A ha {N_MELS_V2A_OUTPUT} bande, Vocoder NVIDIA {NV_NUM_MELS}.")
+            if N_MELS_V2A_OUTPUT != NV_NUM_MELS:  # NV_NUM_MELS è ora 80
+                # Questo blocco NON dovrebbe essere eseguito se il V2A produce 80 mel.
+                # Se viene eseguito, c'è un problema nella configurazione del V2A.
+                print(f"    ERRORE CRITICO V2A (chunk): Mel V2A ha {N_MELS_V2A_OUTPUT} bande, "
+                      f"ma Vocoder NVIDIA si aspetta {NV_NUM_MELS}. Verifica config V2A!")
+                # Potresti voler fare sys.exit(1) qui o gestire l'errore.
+                # Per ora, la logica di padding/troncamento rimarrebbe come fallback,
+                # ma l'obiettivo è che non serva.
                 if N_MELS_V2A_OUTPUT < NV_NUM_MELS:
                     padding_mels = np.zeros((NV_NUM_MELS - N_MELS_V2A_OUTPUT, x_samples_ddim_np.shape[1]))
                     mel_adapted_for_vocoder_np = np.vstack((x_samples_ddim_np, padding_mels))
@@ -533,11 +597,4 @@ def main():
 
 
 if __name__ == "__main__":
-    # Questo va eseguito PRIMA di chiamare main() se le variabili NV_... non sono definite globalmente altrove
-    if not SUCCESS_LOAD_NVIDIA_PARAMS:  # Ricontrolla o assicurati sia già True
-        print("Tentativo di ricaricare parametri NVIDIA prima di main()...")
-        SUCCESS_LOAD_NVIDIA_PARAMS = load_nvidia_vocoder_params_for_v2a(NVIDIA_VOCODER_CONFIG_JSON_IN_V2A)
-        if not SUCCESS_LOAD_NVIDIA_PARAMS:
-            print("ERRORE CRITICO (main): Impossibile caricare i parametri del vocoder NVIDIA. Uscita.")
-            sys.exit(1)
     main()

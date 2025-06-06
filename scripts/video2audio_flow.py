@@ -17,7 +17,19 @@ import soundfile
 from pathlib import Path
 from tqdm import tqdm
 
-# All'inizio dello script, dopo gli import
+import torch # Assicurati che torch sia importato
+import torch._dynamo # Importa dynamo
+
+# --- CONFIGURAZIONE TORCHDYNAMO PER P100 ---
+print(f"PyTorch version (nello script): {torch.__version__}")
+print("Applicazione di torch._dynamo.config.suppress_errors = True nello script...")
+try:
+    torch._dynamo.config.suppress_errors = True
+    print(f"torch._dynamo.config.suppress_errors impostato a: {torch._dynamo.config.suppress_errors}")
+except Exception as e_dynamo_config:
+    print(f"ATTENZIONE: Errore durante l'impostazione di suppress_errors: {e_dynamo_config}")
+# -----------------------------------------
+# --- AGGIUNTA PER CARICAMENTO PARAMETRI VOCODER NVIDIA ---
 PATH_TO_NVIDIA_VOCODER_DIR_IN_V2A = "/kaggle/input/newvocoder/bigvgan_v2_24khz_100band_256x/" # << MODIFICA
 NVIDIA_VOCODER_CONFIG_JSON_IN_V2A = os.path.join(PATH_TO_NVIDIA_VOCODER_DIR_IN_V2A, "config.json")
 
@@ -208,13 +220,13 @@ def parse_args():
     parser.add_argument(
         "--ddim_steps",
         type=int,
-        default=100,  # Originale, potrebbe essere 50 o 200 per CFM
+        default=200,  # Originale, potrebbe essere 50 o 200 per CFM
         help="number of ddim sampling steps",
     )
     parser.add_argument(
         "--scale",
         type=float,
-        default=3.0,
+        default=1.0,  # Originale, potrebbe essere 1.0 per CFM
         help="unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))",
     )
     parser.add_argument(
@@ -521,8 +533,9 @@ def main():
             TARGET_MIN_LOG_MEL_GT = -11.5129
             TARGET_MAX_LOG_MEL_GT = 0.9047
 
-            print(f"    DEBUG: Mel V2A (output VAE) PRIMA di normalizzazione aggiuntiva:")
-            print(f"      Shape: {x_samples_ddim_np.shape}, Min: {np.min(x_samples_ddim_np):.4f}, Max: {np.max(x_samples_ddim_np):.4f}, Mean: {np.mean(x_samples_ddim_np):.4f}, Std: {np.std(x_samples_ddim_np):.4f}")
+            print(f"    DEBUG: Mel V2A (output VAE diretto) passato al vocoder:")
+            print(
+                f"      Shape: {x_samples_ddim_np.shape}, Min: {np.min(x_samples_ddim_np):.4f}, Max: {np.max(x_samples_ddim_np):.4f}, Mean: {np.mean(x_samples_ddim_np):.4f}, Std: {np.std(x_samples_ddim_np):.4f}")
 
             if N_MELS_V2A_OUTPUT != NV_NUM_MELS:  # NV_NUM_MELS è 80
                 print(f"    ERRORE CRITICO V2A (chunk): Mel V2A ha {N_MELS_V2A_OUTPUT} bande, Vocoder NVIDIA {NV_NUM_MELS}.")

@@ -208,13 +208,13 @@ def parse_args():
     parser.add_argument(
         "--ddim_steps",
         type=int,
-        default=50,  # Originale, potrebbe essere 50 o 200 per CFM
+        default=100,  # Originale, potrebbe essere 50 o 200 per CFM
         help="number of ddim sampling steps",
     )
     parser.add_argument(
         "--scale",
         type=float,
-        default=1.0,
+        default=3.0,
         help="unconditional guidance scale: eps = eps(x, empty) + scale * (eps(x, cond) - eps(x, empty))",
     )
     parser.add_argument(
@@ -511,9 +511,48 @@ def main():
             x_samples_ddim = model.decode_first_stage(sample)  # Mel generato dal V2A
 
             # --- BLOCCO ADATTAMENTO MEL GENERATO PER VOCODER NVIDIA ---
-            x_samples_ddim_np = x_samples_ddim.squeeze(0).cpu().numpy()  # (N_MELS_V2A, T_FRAMES_V2A)
+            x_samples_ddim_np = x_samples_ddim.squeeze(0).cpu().numpy()
             N_MELS_V2A_OUTPUT = x_samples_ddim_np.shape[0]
-            [0]
+
+            # Valori target dalle tue statistiche dei Log-Mel GT (quelli che suonano bene)
+            TARGET_MEAN_LOG_MEL_GT = -8.9212
+            TARGET_STD_LOG_MEL_GT = 3.6404
+            # Potresti anche considerare di clippare ai min/max dei GT dopo la normalizzazione
+            TARGET_MIN_LOG_MEL_GT = -11.5129
+            TARGET_MAX_LOG_MEL_GT = 0.9047
+
+            print(f"    DEBUG: Mel V2A (output VAE) PRIMA di normalizzazione aggiuntiva:")
+            print(f"      Shape: {x_samples_ddim_np.shape}, Min: {np.min(x_samples_ddim_np):.4f}, Max: {np.max(x_samples_ddim_np):.4f}, Mean: {np.mean(x_samples_ddim_np):.4f}, Std: {np.std(x_samples_ddim_np):.4f}")
+
+            if N_MELS_V2A_OUTPUT != NV_NUM_MELS:  # NV_NUM_MELS è 80
+                print(f"    ERRORE CRITICO V2A (chunk): Mel V2A ha {N_MELS_V2A_OUTPUT} bande, Vocoder NVIDIA {NV_NUM_MELS}.")
+                # Fallback a zeri se le bande non corrispondono (improbabile ora)
+                mel_processed_for_vocoder_np = np.zeros((NV_NUM_MELS, x_samples_ddim_np.shape[1]),
+                                                        dtype=np.float32) + TARGET_MEAN_LOG_MEL_GT  # Riempi con la media target
+            else:
+                mel_to_normalize = x_samples_ddim_np  # Questo è l'output del VAE V2A
+
+                # Normalizzazione Z-score dell'output V2A e scaling alla distribuzione GT
+                current_mean_v2a = np.mean(mel_to_normalize)
+                current_std_v2a = np.std(mel_to_normalize)
+
+                if current_std_v2a > 1e-5:  # Evita divisione per zero
+                    normalized_mel = (mel_to_normalize - current_mean_v2a) / current_std_v2a  # -> media 0, std 1
+                    scaled_mel_to_gt_dist = normalized_mel * TARGET_STD_LOG_MEL_GT + TARGET_MEAN_LOG_MEL_GT  # -> media e std target
+                else:
+                    # Se la std è quasi zero (mel quasi costante), centra solo sulla media target
+                    scaled_mel_to_gt_dist = mel_to_normalize - current_mean_v2a + TARGET_MEAN_LOG_MEL_GT
+
+                # Opzionale: Clipping ai valori min/max dei GT per evitare valori estremi
+                # mel_processed_for_vocoder_np = np.clip(scaled_mel_to_gt_dist, TARGET_MIN_LOG_MEL_GT, TARGET_MAX_LOG_MEL_GT)
+                # Per ora, prova senza clipping per vedere l'effetto della sola normalizzazione di media/std
+                mel_processed_for_vocoder_np = scaled_mel_to_gt_dist
+
+                print(f"    DEBUG: Mel V2A DOPO normalizzazione per matchare GT:")
+                print(f"      Shape: {mel_processed_for_vocoder_np.shape}, Min: {np.min(mel_processed_for_vocoder_np):.4f}, Max: {np.max(mel_processed_for_vocoder_np):.4f}, Mean: {np.mean(mel_processed_for_vocoder_np):.4f}, Std: {np.std(mel_processed_for_vocoder_np):.4f}")
+
+            spec_syn_for_vocoder = mel_processed_for_vocoder_np.astype(np.float32)
+            generated_mel_chunks_list.append(torch.from_numpy(spec_syn_for_vocoder).to(device))
 
             if N_MELS_V2A_OUTPUT != NV_NUM_MELS:  # NV_NUM_MELS è ora 80
                 # Questo blocco NON dovrebbe essere eseguito se il V2A produce 80 mel.

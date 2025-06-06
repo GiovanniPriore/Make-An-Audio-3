@@ -459,7 +459,8 @@ class VocoderBigVGAN(nn.Module):  # Falla ereditare da nn.Module per coerenza
             "generator.pt",  # Nome comune dopo estrazione o per checkpoint diretti
             "generator.pth",  # Altro nome comune
             "g_02500000",  # Esempio da alcuni repo (senza estensione)
-            "g_02500000.pth",  # Con estensione
+            "g_02500000.pth",
+            "bigvgan_generator.pt",  # Con estensione
             "best_netG.pt"  # Il nome usato nel tuo codice originale
         ]
 

@@ -15,6 +15,8 @@ from .activations import Snake,SnakeBeta
 from .alias_free_torch import *
 import os
 from omegaconf import OmegaConf
+import json # Per caricare config.json
+import yaml # Per il fallback a args.yml
 
 LRELU_SLOPE = 0.1
 
@@ -389,26 +391,193 @@ def generator_loss(disc_outputs):
     return loss, gen_losses
 
 
+class VocoderBigVGAN(nn.Module):  # Falla ereditare da nn.Module per coerenza
+    def __init__(self, ckpt_vocoder_dir, device='cuda'):  # Rinominato per chiarezza
+        super(VocoderBigVGAN, self).__init__()  # Chiama l'init della superclasse
+        self.device = torch.device(device)  # Assicura che device sia un oggetto torch.device
 
-class VocoderBigVGAN(object):
-    def __init__(self, ckpt_vocoder,device='cuda'):
-        vocoder_sd = torch.load(os.path.join(ckpt_vocoder,'best_netG.pt'), map_location='cpu')
+        print(f"VocoderBigVGAN: Inizializzazione dalla directory: {ckpt_vocoder_dir}")
 
-        vocoder_args = OmegaConf.load(os.path.join(ckpt_vocoder,'args.yml'))
+        # --- Caricamento Configurazione ---
+        config_path_json = os.path.join(ckpt_vocoder_dir, "config.json")
+        config_path_yml = os.path.join(ckpt_vocoder_dir, "args.yml")
 
-        self.generator = BigVGAN(vocoder_args)
-        self.generator.load_state_dict(vocoder_sd['generator'])
+        h = None  # Iperparametri
+        if os.path.exists(config_path_json):
+            print(f"  Trovato config.json, lo carico...")
+            with open(config_path_json, "r") as f:
+                data = json.load(f)
+
+            # Converti il dizionario in un oggetto con accesso attributo se Generator se lo aspetta
+            # (molti codici lo fanno per convenienza, es. h.num_mels invece di h['num_mels'])
+            class AttrDict(dict):
+                def __init__(self, *args, **kwargs):
+                    super(AttrDict, self).__init__(*args, **kwargs)
+                    self.__dict__ = self
+
+            h = AttrDict(data)
+            print(f"  Configurazione caricata da config.json.")
+        elif os.path.exists(config_path_yml):
+            print(f"  config.json non trovato, tento con args.yml...")
+            with open(config_path_yml, "r") as f:
+                # OmegaConf.load potrebbe restituire un oggetto OmegaConf,
+                # la classe Generator potrebbe aspettarsi un dizionario o un oggetto AttrDict.
+                # Assumiamo che OmegaConf.load() sia stato usato prima perché la classe Generator
+                # nel tuo codice originale lo gestiva. Se usi un config.json standard,
+                # OmegaConf non è necessario qui.
+                # Per coerenza con il caricamento di config.json, usiamo yaml.safe_load
+                # e poi lo convertiamo in AttrDict.
+                data = yaml.safe_load(f)
+                if isinstance(data, dict):
+                    h = AttrDict(data)
+                else:  # Se OmegaConf restituisce un oggetto custom
+                    h = data  # Lascia che la classe Generator lo gestisca
+                print(f"  Configurazione caricata da args.yml.")
+        else:
+            raise FileNotFoundError(
+                f"Né 'config.json' né 'args.yml' trovati nella directory del vocoder: {ckpt_vocoder_dir}"
+            )
+
+        if h is None:
+            raise ValueError("Impossibile caricare la configurazione del vocoder.")
+
+        # Stampa alcuni parametri chiave per verifica
+        print(f"  Parametri Vocoder (da config): SR={getattr(h, 'sampling_rate', 'N/A')}, "
+              f"NumMels={getattr(h, 'num_mels', 'N/A')}, HopSize={getattr(h, 'hop_size', 'N/A')}")
+
+        # --- Inizializzazione Architettura Generatore ---
+        # Assumiamo che la classe del generatore nel tuo models.py si chiami 'Generator'
+        # e che prenda 'h' (gli iperparametri) come input.
+        # Nel tuo codice originale, chiamavi BigVGAN(vocoder_args), che è probabilmente la classe Generator.
+        self.generator = BigVGAN(h).to(self.device)
+        print(f"  Architettura Generatore ({self.generator.__class__.__name__}) inizializzata.")
+
+        # --- Caricamento Pesi Generatore ---
+        # Cerca i nomi comuni per i pesi del generatore
+        possible_weights_names = [
+            "generator.pth.tar",  # Se hai scaricato .tar e lo hai solo messo lì senza estrarre
+            "generator.pt",  # Nome comune dopo estrazione o per checkpoint diretti
+            "generator.pth",  # Altro nome comune
+            "g_02500000",  # Esempio da alcuni repo (senza estensione)
+            "g_02500000.pth",  # Con estensione
+            "best_netG.pt"  # Il nome usato nel tuo codice originale
+        ]
+
+        weights_path = None
+        for name in possible_weights_names:
+            path_candidate = os.path.join(ckpt_vocoder_dir, name)
+            if os.path.exists(path_candidate):
+                weights_path = path_candidate
+                # Se è un .tar, potremmo doverlo estrarre o caricare diversamente.
+                # Per ora, assumiamo che se si chiama .tar, contiene un file di pesi al suo interno
+                # o che torch.load possa gestirlo (improbabile per .tar direttamente).
+                # È meglio estrarre il .tar manualmente prima e puntare al file .pt/.pth interno.
+                if name.endswith(".pth.tar"):
+                    print(
+                        f"  ATTENZIONE: Trovato file .pth.tar ('{name}'). Assicurati che sia il file di pesi corretto o estrailo.")
+                    # Qui potresti aggiungere logica per estrarre se necessario,
+                    # ma è meglio farlo esternamente. Se torch.load fallisce, questo è un indizio.
+                break
+
+        if weights_path is None:
+            raise FileNotFoundError(
+                f"Nessun file di pesi del generatore riconosciuto trovato in {ckpt_vocoder_dir}."
+                f" Nomi cercati: {possible_weights_names}"
+            )
+
+        print(f"  Caricamento pesi del generatore da: {weights_path}")
+        # Carica i pesi, prova prima a caricare direttamente sul device se possibile
+        # per risparmiare memoria CPU, altrimenti map_location='cpu' e poi .to(device)
+        try:
+            # Tenta di caricare direttamente sul device target
+            checkpoint = torch.load(weights_path, map_location=self.device)
+        except RuntimeError as e_load_device:
+            print(
+                f"    WARN: Fallito caricamento diretto su {self.device} ({e_load_device}). Tento con map_location='cpu'...")
+            checkpoint = torch.load(weights_path, map_location='cpu')
+            # self.generator già su self.device, i pesi verranno spostati da load_state_dict
+
+        # Logica per estrarre lo state_dict corretto dal checkpoint
+        state_dict_generator = None
+        if isinstance(checkpoint, dict):
+            if 'generator' in checkpoint:  # Formato comune per checkpoint che includono anche discriminatori, optim, ecc.
+                state_dict_generator = checkpoint['generator']
+                print("    Trovata chiave 'generator' nel checkpoint.")
+            elif 'model' in checkpoint:  # Altro formato comune
+                state_dict_generator = checkpoint['model']
+                print("    Trovata chiave 'model' nel checkpoint.")
+            elif 'state_dict' in checkpoint:  # Potrebbe essere un checkpoint PyTorch Lightning
+                # Filtra solo i pesi del generatore se sono prefissati
+                state_dict_generator = {
+                    k.replace("generator.", ""): v
+                    for k, v in checkpoint['state_dict'].items()
+                    if k.startswith("generator.")
+                }
+                if not state_dict_generator:  # Se nessun prefisso 'generator.'
+                    print(
+                        "    Trovata chiave 'state_dict', ma nessun prefisso 'generator.'. Assumo sia lo state_dict del generatore.")
+                    state_dict_generator = checkpoint['state_dict']  # Rischioso, potrebbe contenere altro
+                else:
+                    print("    Trovata chiave 'state_dict' e filtrati i pesi per 'generator.'.")
+            else:
+                # Assume che l'intero dizionario 'checkpoint' sia lo state_dict del generatore
+                state_dict_generator = checkpoint
+                print(
+                    "    Nessuna chiave standard ('generator', 'model', 'state_dict') trovata. Assumo che il checkpoint sia lo state_dict del generatore.")
+        else:
+            # Assume che l'oggetto 'checkpoint' sia direttamente lo state_dict (meno comune per i file)
+            state_dict_generator = checkpoint
+            print("    Il checkpoint non è un dizionario. Assumo sia direttamente lo state_dict del generatore.")
+
+        if state_dict_generator is None:
+            raise ValueError(f"Impossibile estrarre lo state_dict del generatore dal file: {weights_path}")
+
+        self.generator.load_state_dict(state_dict_generator)
+        print("  Pesi del generatore caricati con successo.")
+
         self.generator.eval()
+        self.generator.remove_weight_norm()  # Molti modelli GAN usano weight norm in training
+        print("VocoderBigVGAN inizializzato e pronto.")
 
-        self.device = device
-        self.generator.to(self.device)
-
-    def vocode(self, spec):
+    def vocode(self, mel_spectrogram_input):  # Rinominato per chiarezza
+        # mel_spectrogram_input deve essere il log-mel normalizzato corretto
         with torch.no_grad():
-            if isinstance(spec,np.ndarray):
-                spec = torch.from_numpy(spec).unsqueeze(0)
-            spec = spec.to(dtype=torch.float32,device=self.device)
-            return self.generator(spec).squeeze().cpu().numpy()
+            if isinstance(mel_spectrogram_input, np.ndarray):
+                # Converte da (n_mels, T) a (1, n_mels, T) per il batch
+                mel_tensor = torch.from_numpy(mel_spectrogram_input).unsqueeze(0)
+            elif isinstance(mel_spectrogram_input, torch.Tensor):
+                mel_tensor = mel_spectrogram_input
+                if len(mel_tensor.shape) == 2:  # (n_mels, T)
+                    mel_tensor = mel_tensor.unsqueeze(0)  # (1, n_mels, T)
+            else:
+                raise TypeError(
+                    f"Input del vocoder deve essere NumPy array o PyTorch tensor, ricevuto {type(mel_spectrogram_input)}")
 
-    def __call__(self, wav):
-        return self.vocode(wav)
+            # Assicurati che sia float32 e sul device corretto
+            mel_tensor = mel_tensor.to(dtype=torch.float32, device=self.device)
+
+            # Il generatore si aspetta (B, n_mels, T_frames)
+            # Se il tuo mel_tensor è (B, T_frames, n_mels), devi trasporlo:
+            # Esempio: if mel_tensor.shape[1] != self.generator.h.num_mels and mel_tensor.shape[2] == self.generator.h.num_mels:
+            #              mel_tensor = mel_tensor.transpose(1, 2)
+            # Verifica la shape attesa dal tuo Generator. La maggior parte dei vocoder si aspetta (B, n_mels, T)
+
+            # Stampa shape per debug
+            # print(f"    DEBUG Vocoder: Input mel shape: {mel_tensor.shape}")
+            # print(f"    DEBUG Vocoder: Atteso num_mels dal config: {getattr(self.generator.h, 'num_mels', 'N/A')}")
+
+            # Assicurati che num_mels corrisponda
+            expected_n_mels = getattr(self.generator.h, 'num_mels', None)
+            if expected_n_mels is not None and mel_tensor.shape[1] != expected_n_mels:
+                raise ValueError(
+                    f"Shape mismatch per n_mels: input ha {mel_tensor.shape[1]}, vocoder si aspetta {expected_n_mels}")
+
+            waveform_output = self.generator(mel_tensor)  # (B, 1, T_samples)
+
+            # Rimuovi la dimensione del canale audio (se è 1) e la dimensione del batch, poi sposta su CPU e NumPy
+            waveform_output = waveform_output.squeeze(1).squeeze(0).cpu().numpy()
+            return waveform_output
+
+    # __call__ è utile per rendere l'oggetto chiamabile come una funzione
+    def __call__(self, mel_spectrogram_input):
+        return self.vocode(mel_spectrogram_input)

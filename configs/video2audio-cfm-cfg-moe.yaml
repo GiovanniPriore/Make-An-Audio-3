@@ -70,7 +70,7 @@ model:
     cond_stage_config:
       target: ldm.modules.encoders.modules.Video_Feat_Encoder_NoPosembed
       params:
-        origin_dim: 512
+        origin_dim: 1024
         embed_dim: 768
         seq_len: 40
 
